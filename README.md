@@ -1,244 +1,4 @@
-# Issue H-1: OracleProcess.getOraclePrices() might retrive the wrong price for a pair, leading to loss of funds due to wrong price calculation. 
-
-Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/17 
-
-## Found by 
-chaduke
-## Summary
-OracleProcess.getOraclePrices() might retrive the wrong price for a pair, leading to loss of funds due to wrong price calculation. 
-
-## Vulnerability Detail
-
-OracleProcess.getOraclePrices() is supposed to return the max/min price of a pair. 
-
-[https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/8a1a01804a7de7f73a04d794bf6b8104528681ad/elfi-perp-contracts/contracts/process/OracleProcess.sol#L70-L82](https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/8a1a01804a7de7f73a04d794bf6b8104528681ad/elfi-perp-contracts/contracts/process/OracleProcess.sol#L70-L82)
-
-However, due to failing to match the target token (it only matches the ``token``), it will match the first pair whose ``token`` will match but ``targetToken`` might not match. As a result, it can return the wrong price for a pair. 
-
-Consider the following POC with their pair prices:
-
-1) (token1, token2): (300, 400);
-2) (token2, token3): (400, 500);
-3) (token1, token3): (500, 600). 
-4) When we try to retrive the max price for (token1, token3), instead of returning 600, it returns 400, the wrong value. 
-
-```javascript
-function testOracle() public{
-        address token1 = makeAddr("token1");
-        address token2 = makeAddr("token2");
-        address token3 = makeAddr("token3");
-
-        OracleProcess.OracleParam[] memory oracleParams = new OracleProcess.OracleParam[](3); 
-        oracleParams[0] = OracleProcess.OracleParam({
-            token: token1,
-            targetToken: token2,
-            minPrice: 300,
-            maxPrice: 400
-        });
-
-        oracleParams[1] = OracleProcess.OracleParam({
-            token: token2,
-            targetToken: token3,
-            minPrice: 400,
-            maxPrice: 500
-        });
-
-
-        oracleParams[2] = OracleProcess.OracleParam({
-            token: token1,
-            targetToken: token3,
-            minPrice: 500,
-            maxPrice: 600
-        });
-
-
-        console2.log("max price of pair of token1, token3: ", OracleProcess.getOraclePrices(oracleParams, token1, token3, false));
-    }
-```
-
-## Impact
-OracleProcess.getOraclePrices() might retrive the wrong price for a pair, leading to loss of funds due to wrong price calculation. 
-## Code Snippet
-
-## Tool used
-Foundry
-
-Manual Review
-
-## Recommendation
-We need to compare both "token" and "targetToken":
-
-```diff
- function getOraclePrices(
-        OracleParam[] memory params,
-        address token,
-        address targetToken,
-        bool isMin
-    ) external view returns (uint256) {
-        for (uint256 i; i < params.length; i++) {
--            if (params[i].token == token) {
-+            if (params[i].token == token && params[i].targetToken == targetToken) {
-                return isMin ? uint256(params[i].minPrice) : uint256(params[i].maxPrice);
-            }
-        }
-        return getLatestUsdUintPrice(token, targetToken, isMin);
-    }
-```
-
-
-
-## Discussion
-
-**sherlock-admin2**
-
-The protocol team fixed this issue in the following PRs/commits:
-https://github.com/0xCedar/elfi-perp-contracts/pull/38
-
-
-# Issue H-2: PositionQueryProcess.getPositionUnPnl() calculate the wrong amount of UnPnl, as a result, a user (or the Elfi protocol) might loss funds. 
-
-Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/26 
-
-## Found by 
-chaduke
-## Summary
-PositionQueryProcess.getPositionUnPnl() calculate the wrong amount of UnPnl, as a result, a user (or the Elfi protocol) might loss funds.
-
-## Vulnerability Detail
-When a user decreases/close a position, PositionQueryProcess.getPositionUnPnl() is used to calculate the UnPnl for the position: 
-
-[https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/8a1a01804a7de7f73a04d794bf6b8104528681ad/elfi-perp-contracts/contracts/process/PositionQueryProcess.sol#L80-L106](https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/8a1a01804a7de7f73a04d794bf6b8104528681ad/elfi-perp-contracts/contracts/process/PositionQueryProcess.sol#L80-L106)
-
-However, when calculating the amount for the margin token for UnPnl, the following code uses the price of the index token, not that of the margin token: 
-
-```javascript
- if (position.isLong) {
-            int pnlInUsd = position.qty.toInt256().mul(computeIndexPrice.sub(position.entryPrice.toInt256())).div(
-                position.entryPrice.toInt256()
-            );
-            return (
-                CalUtils.usdToTokenInt(pnlInUsd, TokenUtils.decimals(position.marginToken), computeIndexPrice),
-                pnlInUsd
-            );
-```
-As a result, the token amount for the margin token is wrongly calculated, could be more or less based on the difference of prices of the margin token and index token. As  a result, the user or the Elfi protocol might loss funds. 
-
-The following POC confirms my finding, note how the price of the index token is used to calculate the amount of margin token. Complete code is available upon request. 
-
-```javascript
- function testOrder() public{
-         uint256 currentTime = block.timestamp;
-
-         testStake();
-
-         IOrder.PlaceOrderParams memory oparams = IOrder.PlaceOrderParams({
-            symbol: keccak256(abi.encode("symbolA")),
-            isCrossMargin: false,
-            isNativeToken: true,
-            orderSide: Order.Side.LONG,
-            posSide: Order.PositionSide.INCREASE,
-            orderType:  Order.Type.MARKET,
-            stopType: Order.StopType.TAKE_PROFIT,
-            marginToken: address(weth),
-            qty: 1 ether,
-            orderMargin: 1 ether,
-            leverage: 10 * CalUtils.RATE_PRECISION, // 10X
-            triggerPrice: 17000000000,
-            acceptablePrice: 18000000000,
-            executionFee: 1000,
-            placeTime: block.timestamp
-         });
-         vm.startPrank(user1);
-         OrderFacet(payable(address(diamond))).createOrderRequest{value: 1 ether}(oparams);
-         vm.stopPrank();
-
-
-        vm.startPrank(keeper1);
-        OrderFacet(payable(address(diamond))).executeOrder(1112, getOracle1());
-        vm.stopPrank();
-
-        console2.log("User2 requests a short order...");
-        IOrder.PlaceOrderParams memory oparams2 = IOrder.PlaceOrderParams({
-            symbol: keccak256(abi.encode("symbolA")), // join this market
-            isCrossMargin: false,
-            isNativeToken: false,
-            orderSide: Order.Side.SHORT,
-            posSide: Order.PositionSide.INCREASE,
-            orderType:  Order.Type.MARKET,
-            stopType: Order.StopType.TAKE_PROFIT,
-            marginToken: address(usdc),  // should be a stable token
-            qty: 1 ether,
-            orderMargin: 170 ether, // 170 dollars
-            leverage: 10 * CalUtils.RATE_PRECISION, // 10X
-            triggerPrice: 17000000000,
-            acceptablePrice: 16000000000,  // must be higher than this, to pass, [17000, 18000]
-            executionFee: 1000,
-            placeTime: block.timestamp
-         });
-         vm.startPrank(user2);
-         usdc.approve(address(diamond), 170 ether); // approve 1 ether
-         OrderFacet(payable(address(diamond))).createOrderRequest{value: 1000}(oparams2);
-         vm.stopPrank();
-
-        vm.startPrank(keeper1);
-        OrderFacet(payable(address(diamond))).executeOrder(1113, getOracle1());
-        vm.stopPrank();
-
-        vm.warp(currentTime + 1 days);
-        // close the long order
-        console2.log("********************************");
-        console2.log("user1 closes his long order...");
-        IOrder.PlaceOrderParams memory oparams3 = IOrder.PlaceOrderParams({
-            symbol: keccak256(abi.encode("symbolA")),
-            isCrossMargin: false,
-            isNativeToken: true,
-            orderSide: Order.Side.LONG,
-            posSide: Order.PositionSide.DECREASE,
-            orderType:  Order.Type.MARKET,
-            stopType: Order.StopType.TAKE_PROFIT,
-            marginToken: address(weth),
-            qty: 25973999999999974026000,
-            orderMargin: 1 ether,
-            leverage: 10 * CalUtils.RATE_PRECISION, // 10X
-            triggerPrice: 21000000000,
-            acceptablePrice: 20000000000, // sold at least value
-            executionFee: 1000,
-            placeTime: block.timestamp
-         });
-         vm.startPrank(user1);
-         OrderFacet(payable(address(diamond))).createOrderRequest{value: 1000}(oparams3);
-         vm.stopPrank();
-
-        vm.startPrank(keeper1);
-        OrderFacet(payable(address(diamond))).executeOrder(1114, getOracle2());
-        vm.stopPrank();
-    }
-```
-
-## Impact
-PositionQueryProcess.getPositionUnPnl() calculate the wrong amount of UnPnl, as a result, a user (or the Elfi protocol) might loss funds.
-
-## Code Snippet
-
-## Tool used
-foundry
-
-Manual Review
-
-## Recommendation
-Use the price of the margin token to calcualte the amount of margin token for unPNl. 
-
-
-
-## Discussion
-
-**sherlock-admin2**
-
-The protocol team fixed this issue in the following PRs/commits:
-https://github.com/0xCedar/elfi-perp-contracts/pull/59
-
-
-# Issue H-3: Keepers can open positions that are already liquidatable 
+# Issue H-1: Keepers can open positions that are already liquidatable 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/27 
 
@@ -405,7 +165,7 @@ Not really.
 1- Keepers were RESTRICTED in the contest which means they only execute positions.
 2- Since opening positions are 2 step, creating request and executing it, if user opens a greedy position where it gets liquidatable by the time its actually executed then it wouldn't even be keepers fault
 
-# Issue H-4: Anyone can change the balance of an account to drain the entire portfolio vault 
+# Issue H-2: Anyone can change the balance of an account to drain the entire portfolio vault 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/28 
 
@@ -467,7 +227,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/11
 
 
-# Issue H-5: Pool value does not consider the open funding fees 
+# Issue H-3: Pool value does not consider the open funding fees 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/33 
 
@@ -836,7 +596,11 @@ Mechanistically, it is neutral in the long term, and the mechanism balances the 
 
 Same comments applies for issue #33, #102, #258
 
-# Issue H-6: `updateAllPositionFromBalanceMargin` function mistakenly increments positions "fromBalance" 
+**0xELFi**
+
+For the funding fee, we will use the pool as an intermediary for receiving and paying. The pool will bear the risk of timing differences in funding fee settlements. During a certain period, the pool may either profit or incur losses. Over a longer period, we believe that these fluctuations will remain within a certain range.
+
+# Issue H-4: `updateAllPositionFromBalanceMargin` function mistakenly increments positions "fromBalance" 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/35 
 
@@ -1247,7 +1011,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/13
 
 
-# Issue H-7: `updatePositionFromBalanceMargin` function returns "0" if amount to be updated is negative 
+# Issue H-5: `updatePositionFromBalanceMargin` function returns "0" if amount to be updated is negative 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/36 
 
@@ -1310,7 +1074,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/15
 
 
-# Issue H-8: Closing partial positions miscounts the settled fees 
+# Issue H-6: Closing partial positions miscounts the settled fees 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/37 
 
@@ -1717,7 +1481,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/25
 
 
-# Issue H-9: Position net value is using outdated fees 
+# Issue H-7: Position net value is using outdated fees 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/41 
 
@@ -1924,7 +1688,7 @@ https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/8a1a01804a7de7f73a0
 Not a issue:
 This is a relatively common practice in DEX, where the calculation is updated during the next transaction.
 
-# Issue H-10: Cross available value is not accounting the position fees 
+# Issue H-8: Cross available value is not accounting the position fees 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/42 
 
@@ -2008,7 +1772,7 @@ When calculating cross available value we subtract the PnL but not adding it:
 (cache.totalPnl >= 0 ? int256(0) : cache.totalPnl)
 fees are jus like the PnL, they should also be removed since they are a loss/profit as well.
 
-# Issue H-11: Long orders always pays lesser in fees while short orders always pays higher due to oracle pricing 
+# Issue H-9: Long orders always pays lesser in fees while short orders always pays higher due to oracle pricing 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/45 
 
@@ -2110,7 +1874,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/26
 
 
-# Issue H-12: Increasing leverage can make the position have "0" `initialMargin` 
+# Issue H-10: Increasing leverage can make the position have "0" `initialMargin` 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/49 
 
@@ -2338,7 +2102,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/57
 
 
-# Issue H-13: redeem stake token may be Dos because there is not enough balance in stake pool. 
+# Issue H-11: redeem stake token may be Dos because there is not enough balance in stake pool. 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/57 
 
@@ -2466,7 +2230,7 @@ Manual Review
 ## Recommendation
 transfer funds from the portfolio vault to the market vault during the minting process
 
-# Issue H-14: Closing positions does not decrease the pool's entry price, leading to misleading pool value calculations 
+# Issue H-12: Closing positions does not decrease the pool's entry price, leading to misleading pool value calculations 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/58 
 
@@ -2758,7 +2522,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/18
 
 
-# Issue H-15: If cross positions use the same margin token as collateral and close without liability, then fee accounting will be completely wrong 
+# Issue H-13: If cross positions use the same margin token as collateral and close without liability, then fee accounting will be completely wrong 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/60 
 
@@ -3277,7 +3041,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/31
 
 
-# Issue H-16: Lack of timely update borrowing fee when update position's margin 
+# Issue H-14: Lack of timely update borrowing fee when update position's margin 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/63 
 
@@ -3347,7 +3111,7 @@ Manual Review
 ## Recommendation
 Timely update borrowing fees.
 
-# Issue H-17: Uninitialized cache.redeemFee cause 0 redeem fee 
+# Issue H-15: Uninitialized cache.redeemFee cause 0 redeem fee 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/66 
 
@@ -3411,7 +3175,113 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/20
 
 
-# Issue H-18: Pool value calculation skips accounting for stable token losses and short uPnL 
+**Hash01011122**
+
+Escalate
+This is low/info severity issue. Or atleast should reduce severity of this issue.
+>cache.redeemFee is not initialized and the default value is 0.
+
+Initialization of parameters aren't considered as valid High/medium issue. 
+
+Another question to @nevillehuang:
+Even if we consider, What is the probability of LP holders not paying redeem fees when redeem fees isn't cached and what amount Fee rewards are lost? Can you help me understand it with some mathematical model if possible.
+
+**sherlock-admin3**
+
+> Escalate
+> This is low/info severity issue. Or atleast should reduce severity of this issue.
+> >cache.redeemFee is not initialized and the default value is 0.
+> 
+> Initialization of parameters aren't considered as valid High/medium issue. 
+> 
+> Another question to @nevillehuang:
+> Even if we consider, What is the probability of LP holders not paying redeem fees when redeem fees isn't cached and what amount Fee rewards are lost? Can you help me understand it with some mathematical model if possible.
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**goheesheng**
+
+> Escalate This is low/info severity issue. Or atleast should reduce severity of this issue.
+> 
+> > cache.redeemFee is not initialized and the default value is 0.
+> 
+> Initialization of parameters aren't considered as valid High/medium issue.
+> 
+> Another question to @nevillehuang: Even if we consider, What is the probability of LP holders not paying redeem fees when redeem fees isn't cached and what amount Fee rewards are lost? Can you help me understand it with some mathematical model if possible.
+
+I think that this report stating "initialization" can be misleading.
+>  What is the probability of LP holders not paying redeem fees when redeem fees isn't cached
+
+Every user will not be paying them.
+
+**nevillehuang**
+
+@Hash01011122 There is no probability required. Any and all redemptions of stake tokens executed by keeper from LPs will not pay the intended redemption fees.
+
+**WangSecurity**
+
+To clarify, the redemption fee cannot be set later after the contracts are deployed, correct?
+
+**Hash01011122**
+
+@0xELFi @0xELFi02 Would you mind responding to @WangSecurity question.
+
+Also, can anyone help me understand what's the point of cache.redeemTokenAmount? And do redeem token inherently caches redeem fees?
+
+**WangSecurity**
+
+I wouldn’t say it necessary for the sponsors to answer. I can’t see the function to set the fees later, but wanted someone to clarify if I’m missing it or not.
+
+**johnson37**
+
+@WangSecurity , per my understanding, the `cache.redeemFee` should be set via below way. And use this after we set it. We should not create one new temporary variable `redeemFee` to record this fee. 
+```diff
+         StakingAccount.Props storage stakingAccountProps = StakingAccount.load(params.account);
+         AppPoolConfig.LpPoolConfig memory poolConfig = AppPoolConfig.getLpPoolConfig(pool.stakeToken);
+-        uint256 redeemFee = FeeQueryProcess.calcMintOrRedeemFee(cache.redeemTokenAmount, poolConfig.redeemFeeRate);
++        cache.redeemFee = FeeQueryProcess.calcMintOrRedeemFee(cache.redeemTokenAmount, poolConfig.redeemFeeRate);
++        // @audit_fp is this correct here to use false, currently we don't support true.
+         FeeProcess.chargeMintOrRedeemFee(
+-            redeemFee,
++            cache.redeemFee,
+             params.stakeToken,
+             params.redeemToken,
+             params.account,
+             FeeProcess.FEE_REDEEM,
+             false
+         );
+        VaultProcess.transferOut(
+            params.stakeToken,
+            params.redeemToken,
+            params.receiver,
+            cache.redeemTokenAmount - cache.redeemFee
+        );
+```
+
+**WangSecurity**
+
+Yep, I understand that it should be in that way, but since it's not and as I understand indeed `cache.redeemFee` cannot be set after the contest is deployed, I agree it's a valid finding and an issue, not a design decision.
+
+Planning to reject the escalation and leave the issue as it is.
+
+**WangSecurity**
+
+Result:
+High
+Has duplicates
+
+**sherlock-admin4**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [Hash01011122](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/66/#issuecomment-2210834428): rejected
+
+# Issue H-16: Pool value calculation skips accounting for stable token losses and short uPnL 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/71 
 
@@ -3604,12 +3474,12 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/14
 
 
-# Issue H-19: LpPool's can become insolvent if shorters are in huge profits 
+# Issue H-17: LpPool's can become insolvent if shorters are in huge profits 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/72 
 
 ## Found by 
-mstpr-brainbot
+ZeroTrust, mstpr-brainbot, tedox
 ## Summary
 Pools available liquidity is crucial for a pool to be solvent in all times for traders. However, if there are too many shorters in profits, pools available liquidity will not catch that and protocol can go insolvent when they start to realize their profits.
 ## Vulnerability Detail
@@ -3672,7 +3542,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/42/files
 
 
-# Issue H-20: Submitting mint request using user's trading balance and cancelling it will not refund tokens back to trading account 
+# Issue H-18: Submitting mint request using user's trading balance and cancelling it will not refund tokens back to trading account 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/77 
 
@@ -3765,7 +3635,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/53
 
 
-# Issue H-21: Users can use weth to replace any margin token in createUpdatePositionMarginRequest() 
+# Issue H-19: Users can use weth to replace any margin token in createUpdatePositionMarginRequest() 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/79 
 
@@ -3971,7 +3841,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/37
 
 
-# Issue H-22: Traders may decrease the loss via decrease the position's margin 
+# Issue H-20: Traders may decrease the loss via decrease the position's margin 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/82 
 
@@ -4106,7 +3976,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/57
 
 
-# Issue H-23: Canceling a mint stake token can result in the execution fee being sent from the wrong vault 
+# Issue H-21: Canceling a mint stake token can result in the execution fee being sent from the wrong vault 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/86 
 
@@ -4210,7 +4080,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/54
 
 
-# Issue H-24: If the stake token is minted from portfolio vault, positions from balances are not decreased 
+# Issue H-22: If the stake token is minted from portfolio vault, positions from balances are not decreased 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/106 
 
@@ -4286,7 +4156,7 @@ https://github.com/0xCedar/elfi-perp-contracts/pull/51
 
 "fromBalance" is extremely important to measure users cross available value which is the value user is allowed to open cross positions. When an amount is withdrawn from users cross balance without updating its "fromBalance" the cross available value will be higher than usual although the user has lesser collateral which means user can open positions that are more than allowed respect to his/her cross portfolio balances
 
-# Issue H-25: Deleveraging can result in a zero borrowed amount while maintaining the leveraged position 
+# Issue H-23: Deleveraging can result in a zero borrowed amount while maintaining the leveraged position 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/114 
 
@@ -4353,7 +4223,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/57
 
 
-# Issue H-26: Excess fromBalance removal not added to other positions fromBalance's when leveraging up 
+# Issue H-24: Excess fromBalance removal not added to other positions fromBalance's when leveraging up 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/117 
 
@@ -4466,7 +4336,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/35
 
 
-# Issue H-27: Updating leverage changes the cross net and cross available value 
+# Issue H-25: Updating leverage changes the cross net and cross available value 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/118 
 
@@ -4665,7 +4535,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/57
 
 
-# Issue H-28: Minting stake tokens is not updating the pool's borrowing fee rate 
+# Issue H-26: Minting stake tokens is not updating the pool's borrowing fee rate 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/136 
 
@@ -4726,7 +4596,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/47
 
 
-# Issue H-29: Attacker can inflate stake rewards as he wants. 
+# Issue H-27: Attacker can inflate stake rewards as he wants. 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/146 
 
@@ -4832,7 +4702,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/19
 
 
-# Issue H-30: Improper implementation of the `PositionMarginProcess.updatePositionFromBalanceMargin()` function. 
+# Issue H-28: Improper implementation of the `PositionMarginProcess.updatePositionFromBalanceMargin()` function. 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/159 
 
@@ -4911,7 +4781,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/57
 
 
-# Issue H-31: Incorrect implementation of the `PositionMarginProcess.updatePositionFromBalanceMargin()` function. 
+# Issue H-29: Incorrect implementation of the `PositionMarginProcess.updatePositionFromBalanceMargin()` function. 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/163 
 
@@ -4974,7 +4844,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/43
 
 
-# Issue H-32: Mismatching funding fees can result in the protocol incurring a deficit or insolvency risk 
+# Issue H-30: Mismatching funding fees can result in the protocol incurring a deficit or insolvency risk 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/258 
 
@@ -5062,7 +4932,7 @@ Mechanically, it is neutral in the long term, and the mechanism balances the imp
 
 Same comments applies for issue #33, #102, #258
 
-# Issue H-33: Users profit in short cross will leave the fees in UsdPool instead of LpPool 
+# Issue H-31: Users profit in short cross will leave the fees in UsdPool instead of LpPool 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/261 
 
@@ -5167,7 +5037,365 @@ For the short borrowing fee, we have designed it to be retained in the USD pool 
 
 @0xELFi Is there anyway this fees can be retrieved? If not I believe this issue is valid
 
-# Issue H-34: The redeem process updates the rewards in the wrong order 
+**0xELFi**
+
+The borrowing fee belongs to the USD pool. The borrowing fees from trader users will be directly rewarded to the corresponding pool, including the stablecoin pool.
+
+# Issue H-32: In Cross Margin mode, the user’s profit calculation is incorrect. 
+
+Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/273 
+
+The protocol has acknowledged this issue.
+
+## Found by 
+ZeroTrust
+
+## Summary
+In Cross Margin mode, the user’s profit calculation is incorrect.
+## Vulnerability Detail
+We know that isolated and cross margin are different. When a position is created, in isolated mode, the corresponding assets need to be transferred from the user’s wallet to the MarketVault, while in cross margin mode, the user only needs to have sufficient collateral in the PortfolioVault (any supported collateral will do).
+For example, with 1x leverage going long on WETH-USDC, the position size is 1 WETH, and the price of WETH is 1000 USD.
+- In isolated mode, when establishing the position, 1 WETH is transferred to the MarketVault, so the borrowing is 0.
+- In cross margin mode, assuming the collateral in the PortfolioVault is 10,000 USDC, no funds are transferred when creating the position. 
+When the price of WETH rises to 2000 USD, closing the position makes it more evident.
+
+- In isolated mode: The user profits 1000 USD (2000 USD - 1000 USD initial capital), and finally still gets their original 1 WETH (2000 USD), which is used for trading.
+
+- In cross margin mode: The user profits 1000 USD (2000 USD - 1000 USD initial borrowed funds), and finally gets 0.5 WETH.
+
+```javascript
+function decreasePosition(Position.Props storage position, DecreasePositionParams calldata params) external {
+        int256 totalPnlInUsd = PositionQueryProcess.getPositionUnPnl(position, params.executePrice.toInt256(), false);
+        Symbol.Props memory symbolProps = Symbol.load(params.symbol);
+        AppConfig.SymbolConfig memory symbolConfig = AppConfig.getSymbolConfig(params.symbol);
+        FeeProcess.updateBorrowingFee(position, symbolProps.stakeToken);
+        FeeProcess.updateFundingFee(position);
+@>>        DecreasePositionCache memory cache = _updateDecreasePosition(
+            position,
+            params.decreaseQty,
+            totalPnlInUsd,
+            params.executePrice.toInt256(),
+            symbolConfig.closeFeeRate,
+            params.isLiquidation,
+            params.isCrossMargin
+        );
+       //skip .........
+       
+    }
+```
+
+```javascript
+   function _updateDecreasePosition(
+        Position.Props storage position,
+        uint256 decreaseQty,
+        int256 pnlInUsd,
+        int256 executePrice,
+        uint256 closeFeeRate,
+        bool isLiquidation,
+        bool isCrossMargin
+    ) internal view returns (DecreasePositionCache memory cache) {
+        cache.position = position;
+        cache.executePrice = executePrice;
+        int256 tokenPrice = OracleProcess.getLatestUsdPrice(position.marginToken, false);
+        cache.marginTokenPrice = tokenPrice.toUint256();
+        uint8 tokenDecimals = TokenUtils.decimals(position.marginToken);
+        if (position.qty == decreaseQty) {
+@>>            cache.decreaseMargin = cache.position.initialMargin;
+            cache.decreaseMarginInUsd = cache.position.initialMarginInUsd;
+            cache.unHoldPoolAmount = cache.position.holdPoolAmount;
+            (cache.settledBorrowingFee, cache.settledBorrowingFeeInUsd) = FeeQueryProcess.calcBorrowingFee(
+                decreaseQty,
+                position
+            );
+            cache.settledFundingFee = cache.position.positionFee.realizedFundingFee;
+            cache.settledFundingFeeInUsd = cache.position.positionFee.realizedFundingFeeInUsd;
+
+            cache.closeFeeInUsd = cache.position.positionFee.closeFeeInUsd;
+            cache.closeFee = FeeQueryProcess.calcCloseFee(tokenDecimals, cache.closeFeeInUsd, tokenPrice.toUint256());
+            cache.settledFee =
+                cache.settledBorrowingFee.toInt256() +
+                cache.settledFundingFee +
+                cache.closeFee.toInt256();
+//skip .......
+            {
+                cache.settledMargin = CalUtils.usdToTokenInt(
+                    cache.position.initialMarginInUsd.toInt256() - _getPosFee(cache) + pnlInUsd,
+                    TokenUtils.decimals(cache.position.marginToken),
+                    tokenPrice
+                );
+@>>             cache.recordPnlToken = cache.settledMargin - cache.decreaseMargin.toInt256();
+                cache.poolPnlToken =
+                    cache.decreaseMargin.toInt256() -
+                    CalUtils.usdToTokenInt(
+                        cache.position.initialMarginInUsd.toInt256() + pnlInUsd,
+                        TokenUtils.decimals(cache.position.marginToken),
+                        tokenPrice
+                    );
+            }
+            cache.realizedPnl = CalUtils.tokenToUsdInt(
+                cache.recordPnlToken,
+                TokenUtils.decimals(cache.position.marginToken),
+                tokenPrice
+            );
+            console2.log("cache.position.initialMarginInUsd is", cache.position.initialMarginInUsd);
+            console2.log("cache.settledMargin is ", cache.settledMargin);
+            
+            console2.log("cache.recordPnlToken is ", cache.recordPnlToken);
+            console2.log("cache.poolPnlToken is ", cache.poolPnlToken);
+            console2.log("cache.realizedPnl is ", cache.realizedPnl);
+
+        } 
+        //skip ......    
+
+        return cache;
+    }
+
+```
+However, in _updateDecreasePosition, cache.recordPnlToken = cache.settledMargin - cache.decreaseMargin.toInt256(), where cache.decreaseMargin = cache.position.initialMargin, causing cache.recordPnlToken to be nearly zero. 
+This is incorrect in cross margin mode, because in cross margin mode, the initialMargin (with) is not invested in the market. Therefore, cache.recordPnlToken = cache.settledMargin.
+#### poc
+For example, with 1x leverage going long on WETH-USDC, the position size is 1 WETH, and the price of WETH is 1000 USD.
+When the price of WETH rises to 2000 USD, closing the position makes it more evident.
+
+```javascript
+function testCrossMarginOrderExecute() public{
+        ethPrice = 1000e8;
+        usdcPrice = 101e6;
+        OracleProcess.OracleParam[] memory oracles = getOracles(ethPrice, usdcPrice);
+
+        userDeposit();
+        depositWETH();
+
+        openCrossMarginOrder();
+
+        //after a day
+        skip(1 days);
+        ethPrice = 2000e8;
+        closeCrossMarginLongPosition();
+
+        getPoolWithOracle(oracles);
+    
+    }
+```
+Test the base code to verify this.
+```bash
+    totalPnlInUsd is  998900000000000000000
+    cache.position.initialMarginInUsd is 998900000000000000000
+    cache.settledMargin is  997387665400000000
+    cache.recordPnlToken is  -1512334600000000
+     cache.poolPnlToken is  0
+    cache.realizedPnl is  -3024669200000000000
+  
+```
+It can be seen that the profit is a negative value close to zero, which is obviously incorrect.
+## Impact
+This causes financial loss for either the user or the protocol.
+## Code Snippet
+https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/main/elfi-perp-contracts/contracts/process/DecreasePositionProcess.sol#L60
+
+https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/main/elfi-perp-contracts/contracts/process/DecreasePositionProcess.sol#L206
+## Tool used
+
+Manual Review
+
+## Recommendation
+Distinguish between the handling methods for isolated mode and cross margin mode.
+
+
+
+
+## Discussion
+
+**ZeroTrust01**
+
+Hey, @nevillehuang 
+
+The sponsor’s responses:
+[@ZeroTrust01 is right](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/272#issuecomment-2202174550)
+[so finally gets 1WETH (Both cross and isolate)](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/272#issuecomment-2202175716)
+
+**have at least confirmed that this issue is valid.** 
+In cross margin mode, if you invest 1000 USD(eg Whether the collateral is 1 BTC or 1000 USDT in the PortfolioVault) and end up with 1 WETH (2000 USD), my PoC proves that the system’s calculation is incorrect, resulting in a negative profit.
+
+As for issue [272](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/272), the discussion is about having 1 WBTC(Using 1000 USDT as an example would be more appropriate) in cross margin mode. Assuming you invest one WETH (1000 USD) with 1x leverage to go long, should this 1000 USD be borrowed from the LpPool, or can a portion of the 1 WBTC’s value (1000 USD) directly participate in the market trading?
+
+272 and 273 are different issues with different focuses. The root causes in the code are also different.
+
+
+**0502lian**
+
+Escalate
+This should be a valid issue.
+
+A very simple scenario:
+Assumption: Initially, the price of WETH is 1000 USD, and the price at closing the position is 2000 USD.
+
+- In isolated mode, the user’s initial capital is 1 WETH.
+- In cross margin mode, the user’s initial capital is 1000 USDT.
+
+They both go long with 1x leverage in the WETH-USDC market. The final profit situation is as follows(has already been confirmed by the sponsor):
+
+- In isolated mode: The user profits 1000 USD (2000 USD - 1000 USD initial capital) and finally still gets their original 1 WETH (2000 USD), which is used for trading.
+- In cross margin mode: The user profits 1000 USD (2000 USD - 1000 USD initial borrowed funds) and finally gets 0.5 WETH.
+
+In this case, because using 1 leverage, whether it is cross mode or isolated mode, there is no borrowing from the LP. So finally, the user gets 1 WETH (Both cross and isolated).
+
+For cross margin mode:  1 WETH(2000usd) - 1000 usdt = 0.5 WETH
+However, the PoC shows that in cross margin mode, the profit is 0, which is obviously incorrect.
+
+**sherlock-admin3**
+
+> Escalate
+> This should be a valid issue.
+> 
+> A very simple scenario:
+> Assumption: Initially, the price of WETH is 1000 USD, and the price at closing the position is 2000 USD.
+> 
+> - In isolated mode, the user’s initial capital is 1 WETH.
+> - In cross margin mode, the user’s initial capital is 1000 USDT.
+> 
+> They both go long with 1x leverage in the WETH-USDC market. The final profit situation is as follows(has already been confirmed by the sponsor):
+> 
+> - In isolated mode: The user profits 1000 USD (2000 USD - 1000 USD initial capital) and finally still gets their original 1 WETH (2000 USD), which is used for trading.
+> - In cross margin mode: The user profits 1000 USD (2000 USD - 1000 USD initial borrowed funds) and finally gets 0.5 WETH.
+> 
+> In this case, because using 1 leverage, whether it is cross mode or isolated mode, there is no borrowing from the LP. So finally, the user gets 1 WETH (Both cross and isolated).
+> 
+> For cross margin mode:  1 WETH(2000usd) - 1000 usdt = 0.5 WETH
+> However, the PoC shows that in cross margin mode, the profit is 0, which is obviously incorrect.
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**0xELFi**
+
+We separate the consideration of funds into two parts: one is the user's own margin assets, and the other is the user's position profit. Let's first look at the profit part: regardless of whether it is isolated or cross, their profit is (2000USD-1000USD)/2000 = 0.5 WETH.
+
+Margin asset part: since we price the margin in USD at the moment the user opens the position, both isolated and cross margin are 1000USD. Relative to the latest WETH price of 2000USD, the margin becomes 0.5 ETH. So for both cross and isolated users, the settledMargin is 0.5WETH + 0.5WETH = 1 WETH. The user actually invests 1 WETH. For the user, if we disregard the fee issue, the recordPnlToken should be 0.
+
+The only difference between isolated and cross margin here is: with cross margin, the user uses their own assets as collateral to borrow 1 WETH to go long on ETHUSD. For the system in terms of opening and closing positions, it is the same as isolated margin, meaning the user uses 1 WETH to go long on ETHUSD.
+
+**0502lian**
+
+You said that “The only difference between isolated and cross margin here is: with cross margin, the user uses their own assets as collateral to borrow 1 WETH to go long on ETHUSD.”
+This is exactly what issue 272 points out:
+Isolated Mode: borrows 0,
+Cross Margin Mode: borrows 1 WETH.
+But you say it is invalid.
+
+
+**WangSecurity**
+
+Let's focus on this issue here and keep the discussion about #272 there. As I understand [this comment](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/273#issuecomment-2210217125) the protocol is working as it should, but i might be missing something, so please correct me.
+
+**0502lian**
+
+> We separate the consideration of funds into two parts: one is the user's own margin assets, and the other is the user's position profit. Let's first look at the profit part: regardless of whether it is isolated or cross, their profit is (2000USD-1000USD)/2000 = 0.5 WETH.
+> 
+> Margin asset part: since we price the margin in USD at the moment the user opens the position, both isolated and cross margin are 1000USD. Relative to the latest WETH price of 2000USD, the margin becomes 0.5 ETH. So for both cross and isolated users, the settledMargin is 0.5WETH + 0.5WETH = 1 WETH. The user actually invests 1 WETH. For the user, if we disregard the fee issue, the recordPnlToken should be 0.
+> 
+> The only difference between isolated and cross margin here is: with cross margin, the user uses their own assets as collateral to borrow 1 WETH to go long on ETHUSD. For the system in terms of opening and closing positions, it is the same as isolated margin, meaning the user uses 1 WETH to go long on ETHUSD.
+
+
+@WangSecurity 
+
+The sponsor’s statement that 
+_“The only difference between isolated and cross margin here is: with cross margin, the user uses their own assets as collateral to borrow 1 WETH to go long on ETHUSD. For the system in terms of opening and closing positions, it is the same as isolated margin, meaning the user uses 1 WETH to go long on ETHUSD”_ 
+**is not a fact, but just their idea.** 
+
+This is why I pointed out in other issues that they need to actually borrow.
+Borrowing requires a lender, doesn’t it? Can the sponsor  @0xELFi  help us by telling who the lender is? If the amount borrowed is 1e18 WETH, then if the user’s position increases by 1e18 WETH, whose account decreases by 1e18 WETH?
+Thank you .
+
+**WangSecurity**
+
+> This is why I pointed out in other issues that they need to actually borrow.
+Borrowing requires a lender, doesn’t it? Can the sponsor @0xELFi help us by telling who the lender is? If the amount borrowed is 1e18 WETH, then if the user’s position increases by 1e18 WETH, whose account decreases by 1e18 WETH?
+Thank you 
+
+As I understand you again talk about #272 and let's keep the discussion about it under #272. As I understand this report is only a design recommendation and not a real issue. But if I'm missing why this one is a valid issue, please correct me.
+
+**0502lian**
+
+> > This is why I pointed out in other issues that they need to actually borrow.
+> > Borrowing requires a lender, doesn’t it? Can the sponsor @0xELFi help us by telling who the lender is? If the amount borrowed is 1e18 WETH, then if the user’s position increases by 1e18 WETH, whose account decreases by 1e18 WETH?
+> > Thank you
+> 
+> As I understand you again talk about #272 and let's keep the discussion about it under #272. As I understand this report is only a design recommendation and not a real issue. But if I'm missing why this one is a valid issue, please correct me.
+
+
+
+This is definitely a serious issue. User's profit have been lost. **I have proven the loss of funds using PoC and test code.**
+
+**A very simple scenario:**
+- Assumption: Initially, the price of WETH is 1000 USD, and the price at closing the position is 2000 USD.
+- In cross margin mode, the user Bob’s initial capital is 1000 USDT.
+- He goes long with 1x leverage in the WETH-USDC market. The final profit situation is as follows (has already been confirmed by the sponsor):
+- In cross margin mode: The user profits 1000 USD (2000 USD - 1000 USD initial funds),
+and finally he gets 1000 USD/2000 USD = 0.5 WETH. (Because the price  of WETH is 2000 USD now)
+
+**However, the Proof of Code shows that in cross margin mode, the profit is 0. The profit being 0 is clearly incorrect.**
+
+Anyone with trading experience would immediately know that the profit of 0 is wrong.
+Everyone can verify that the description of the simple scenario is factual.
+
+It is very important for the judgment of this issue to note that some statements made by the sponsor are not based on the factual code.
+>"Margin asset part: since we price the margin in USD at the moment the user opens the position, both isolated and cross margin are 1000USD. Relative to the latest WETH price of 2000USD, the margin becomes 0.5 ETH. So for both cross and isolated users, the settledMargin is 0.5WETH + 0.5WETH = 1 WETH. The user actually invests 1 WETH. For the user, if we disregard the fee issue, the recordPnlToken should be 0."
+
+_The user actually invests 1 WETH. — This is not true; the cross margin user invests 1000 USDT._
+
+
+>"The only difference between isolated and cross margin here is: with cross margin, the user uses their own assets as collateral to borrow 1 WETH to go long on ETHUSD. For the system in terms of opening and closing positions, it is the same as isolated margin, meaning the user uses 1 WETH to go long on ETHUSD."
+
+_The user uses their own assets as collateral to borrow 1 WETH to go long on ETHUSD. — This is not true, they did not borrow 1 WETH from anyone. The sponsor cannot specify who the lender is, the process of the borrow transaction, or whose account decreased by 1 WETH._
+
+I have already provided PoC and test results. However, the sponsor refutes me based on assertions that are not true of the code. Moreover, the proof of concept I provided is very simple and should be understandable to everyone, especially for those with token trading experience—it’s clear at a glance.
+
+
+**WangSecurity**
+
+Thank you for such a thorough response, I believe you're correct here and this issue is indeed valid. As I understand it will happen is almost every trade due to incorrect formula, correct?
+
+
+**0502lian**
+
+
+
+
+> Thank you for such a thorough response, I believe you're correct here and this issue is indeed valid. As I understand it will happen is almost every trade due to incorrect formula, correct?
+
+
+Yes, it will happen is almost every trade due to incorrect formula in Cross Margin Mode.
+![ElFi申辩证据](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/assets/8157079/bb331775-8f4c-429b-bb95-3ca3c3a41888)
+The sponsor actually admitted this issue  during the competition.
+
+
+**WangSecurity**
+
+Thank you very much, planning to accept the escalation and validate the issue with high severity, cause the constraints are not extreme.
+
+**mstpr**
+
+@0xELFi @0xELFi02 @nevillehuang @WangSecurity 
+This issue looks a valid high to me. I am wondering why it has the "Sponsor Disputed" tag? 
+
+**WangSecurity**
+
+Result:
+High
+Unique 
+
+**sherlock-admin2**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [0502lian](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/273/#issuecomment-2209659174): accepted
+
+# Issue H-33: The redeem process updates the rewards in the wrong order 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/274 
 
@@ -5551,127 +5779,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/22
 
 
-# Issue M-3: `autoReducePositions` uses the wrong price 
-
-Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/51 
-
-The protocol has acknowledged this issue.
-
-## Found by 
-mstpr-brainbot
-## Summary
-Positions can be auto closed by keeper calling `autoReducePositions`. However, the price used in this function is not inline with the typical decrease position flow.
-## Vulnerability Detail
-When a position is decreased the min/max price calculated as follows in `OrderProcess::_getExecutionPrice()` internal function:
-```solidity
-if (Order.PositionSide.INCREASE == order.posSide) {
-            isMinPrice = Order.Side.SHORT == order.orderSide;
-        } else {
-            isMinPrice = Order.Side.LONG == order.orderSide;
-        }
-```
-
-If a LONG order is closed, the order side has to be SHORT and vice versa. Assuming a LONG position is about to be closed, the order side is SHORT. This means `isMinPrice` will be `DECREASE/SHORT = false`, which indicates we will use the max price of the oracle. The actual price is fetched in the following lines of the function as follows:
-
-```solidity
-uint256 indexPrice = OracleProcess.getLatestUsdUintPrice(indexToken, isMinPrice);
-```
-
-Since we will use the maximum price, this will be in favor of the user.
-
-However, when the `PositionFacet::autoReducePositions` function closes the position, it uses the minimum price for closing LONG orders and vice versa for the SHORT orders.
-```solidity
-position.decreasePosition(
-                DecreasePositionProcess.DecreasePositionParams(
-                    requestId,
-                    position.symbol,
-                    false,
-                    position.isCrossMargin,
-                    position.marginToken,
-                    position.qty,
-                    -> OracleProcess.getLatestUsdUintPrice(position.indexToken, position.isLong) // isLong is true hence, we get the min price
-                )
-            );
-```
-
-In the end users position will be closed in a worse pricing than a typical decrease position flow
-## Impact
-Auto reducing will always close the positions worse than a normal decrease position flow. It is not inconsistent and not favorable of user in any case. Hence, I'll label this as medium.
-## Code Snippet
-https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/8a1a01804a7de7f73a04d794bf6b8104528681ad/elfi-perp-contracts/contracts/facets/PositionFacet.sol#L196-L216
-
-https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/8a1a01804a7de7f73a04d794bf6b8104528681ad/elfi-perp-contracts/contracts/process/OrderProcess.sol#L236-L271
-## Tool used
-
-Manual Review
-
-## Recommendation
-Change to this:
-`OracleProcess.getLatestUsdUintPrice(position.indexToken, !position.isLong)`
-
-
-
-## Discussion
-
-**0xELFi**
-
-Our design takes this into consideration.
-
-**nevillehuang**
-
-@0xELFi Could you shed light on what is the exact design described? This could be valid since the contest details does not state this.
-
-# Issue M-4: The `autoReducePositions` function is not updating the market funding and pool borrowing fees prior to closing the position 
-
-Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/52 
-
-## Found by 
-mstpr-brainbot
-## Summary
-When positions are decreased via `autoReducePositions` call, borrowing and funding fees are not updated which leads to inaccurate fee accounting for the users.
-## Vulnerability Detail
-The markets overall borrowing and funding rates are updated in the casual flow of decrease position via these function calls:
-```solidity
-function _executeDecreaseOrder(
-        uint256 orderId,
-        Order.OrderInfo memory order,
-        Symbol.Props memory symbolProps
-    ) internal {
-        .
-        .
-        -> MarketProcess.updateMarketFundingFeeRate(symbolProps.code);
-       ->  MarketProcess.updatePoolBorrowingFeeRate(symbolProps.stakeToken, position.isLong, order.marginToken);
-}
-```
-
-This update is very crucial because it will accrue the interest up to the current time for both funding and borrowing fees, which are essential for determining users' and pools' profit/loss. However, as we can observe, the `autoReducePositions` function skips updating the rates and directly closes the position.
-## Impact
-Latest accrued interest will not be updated for the user and previous values will be used. User can get a higher profit or a lesser loss or completely opposites of these. This will also break the entire Masterchef alike flywheel and affect other users as well. Hence, high.
-## Code Snippet
-https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/8a1a01804a7de7f73a04d794bf6b8104528681ad/elfi-perp-contracts/contracts/facets/PositionFacet.sol#L196-L216
-https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/8a1a01804a7de7f73a04d794bf6b8104528681ad/elfi-perp-contracts/contracts/process/OrderProcess.sol#L414-L451
-## Tool used
-
-Manual Review
-
-## Recommendation
-Add these two functions before calling the autoReducePositions:
-```solidity
-MarketProcess.updateMarketFundingFeeRate(symbolProps.code);
-MarketProcess.updatePoolBorrowingFeeRate(symbolProps.stakeToken, position.isLong, order.marginToken);
-```
-
-
-
-## Discussion
-
-**sherlock-admin2**
-
-The protocol team fixed this issue in the following PRs/commits:
-https://github.com/0xCedar/elfi-perp-contracts/pull/56
-
-
-# Issue M-5: Incorrect settleFee process for cross-margin account 
+# Issue M-3: Incorrect settleFee process for cross-margin account 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/61 
 
@@ -5764,7 +5872,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/31
 
 
-# Issue M-6: Lack of execution fee mechanism in AccountFacet 
+# Issue M-4: Lack of execution fee mechanism in AccountFacet 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/62 
 
@@ -5814,7 +5922,64 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/36
 
 
-# Issue M-7: If stable tokens depeg, short funding fees will not be accounted properly 
+**ctmotox2**
+
+Escalate
+This issue should be marked as invalid because it reflects a design choice rather than a vulnerability. The decision to not include an execution fee mechanism in AccountFacet may be intentional and aligned with the overall design and upgrade strategy of the protocol. Since the contract is Diamond-upgradable, a function to withdraw fees can be introduced in the future if necessary. Therefore, this does not constitute a security vulnerability but rather a design decision.
+
+
+
+**sherlock-admin3**
+
+> Escalate
+> This issue should be marked as invalid because it reflects a design choice rather than a vulnerability. The decision to not include an execution fee mechanism in AccountFacet may be intentional and aligned with the overall design and upgrade strategy of the protocol. Since the contract is Diamond-upgradable, a function to withdraw fees can be introduced in the future if necessary. Therefore, this does not constitute a security vulnerability but rather a design decision.
+> 
+> 
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**johnson37**
+
+I have double confirmed with the sponsor before I submitted this finding. There is no decision to not include an execution fee mechanism. They just miss this part. 
+
+**nevillehuang**
+
+Considering that all other executions (redemption/deposits/orders) have execution fees in place, I believe this is a valid issue if not keepers are not incentivize to pay gas to execute withdrawals for users. The loss here would be the gas fees for them (they have no benefit in following through with withdrawals)
+
+**WangSecurity**
+
+@johnson37 could you provide screenshots of you confirming this with the sponsor?
+
+**johnson37**
+
+![image](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/assets/15100170/cd1ff09a-4a05-46ae-b9be-16c2112e9573)
+
+@WangSecurity , this is one screenshot from my private thread.
+
+**WangSecurity**
+
+Thank you, based on the comments above and [this](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/62#issuecomment-2211628532) I believe it should remain a valid issue.
+
+Planning to reject the escalation and leave the issue as it is.
+
+**WangSecurity**
+
+Result:
+Medium
+Has duplicates
+
+**sherlock-admin4**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [Ctmotox2](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/62/#issuecomment-2210739109): rejected
+
+# Issue M-5: If stable tokens depeg, short funding fees will not be accounted properly 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/70 
 
@@ -5937,7 +6102,11 @@ Our design dictates that the Pool will bear the funding fee and price fluctuatio
 
 What is the specific design here? Since there is no indication in the contest details that this is the intennded design I believe this issue is valid
 
-# Issue M-8: Call of ````revokeAllRole()```` would fail silently 
+**0xELFi**
+
+For the funding fee, we will use the pool as an intermediary for receiving and paying. The pool will bear the risk of timing differences in funding fee settlements. During a certain period, the pool may either profit or incur losses. Over a longer period, we believe that these fluctuations will remain within a certain range. we assume the stablecoin's price to be $1 during calculations. The pool will bear the risk of fluctuations in the stablecoin's price.
+
+# Issue M-6: Call of ````revokeAllRole()```` would fail silently 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/80 
 
@@ -6054,7 +6223,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/16
 
 
-# Issue M-9: Lack of oracle setting in autoReducePositions 
+# Issue M-7: Lack of oracle setting in autoReducePositions 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/83 
 
@@ -6166,7 +6335,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/21
 
 
-# Issue M-10: The `lossFee` is simply added to the `commonData` and not reimbursed to the keeper, leading to potential losses for the keeper. 
+# Issue M-8: The `lossFee` is simply added to the `commonData` and not reimbursed to the keeper, leading to potential losses for the keeper. 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/93 
 
@@ -6228,7 +6397,144 @@ Implement a function to incentivize the keepers for there loss in execution fee.
 
 We will fix it in future versions.
 
-# Issue M-11: The implementation of `payExecutionFee()` didn't take `EIP-150` into consideration. Keepers can steal additional execution fee from users. 
+**ctmotox2**
+
+Escalate
+This is a future assumption of the code and can also be interpreted as a design choice. Loss fees are correctly accounted for in Diamond's storage. While there is currently no function to withdraw these fees to keepers, a new function can be introduced to facilitate this since the contract is Diamond-upgradable.
+
+**sherlock-admin3**
+
+> Escalate
+> This is a future assumption of the code and can also be interpreted as a design choice. Loss fees are correctly accounted for in Diamond's storage. While there is currently no function to withdraw these fees to keepers, a new function can be introduced to facilitate this since the contract is Diamond-upgradable.
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Nikhil8400**
+
+
+
+I believe my finding regarding the `lossFee` not being reimbursed to the keeper should be marked as valid for the following reasons:
+
+1. **Documentation and Protocol Transparency:**
+   - Nowhere in the protocol's documentation, including the [design choices](https://github.com/sherlock-audit/2024-05-elfi-protocol-Nikhil8400?tab=readme-ov-file#q-please-discuss-any-design-choices-you-made) or [known issues](https://github.com/sherlock-audit/2024-05-elfi-protocol-Nikhil8400?tab=readme-ov-file#q-please-list-any-known-issuesacceptable-risks-that-should-not-result-in-a-valid-finding) sections, is this issue mentioned. Transparent communication about such potential losses is crucial for keepers to make informed decisions.
+
+2. **Acknowledgment of Issue:**
+   - The escalation response acknowledges that the issue can be mitigated by introducing a new function to facilitate reimbursement. This acknowledgment itself indicates that the current implementation is lacking a necessary function, thereby confirming the presence of the issue.
+
+3. **Diamond-Upgradable Argument:**
+   - While it's true that the contract's Diamond-upgradable nature allows for future enhancements, this does not negate the current issue. If we were to apply this logic universally, it would imply that any issue could be dismissed on the grounds that it can be fixed in the future. This undermines the purpose of identifying and addressing issues during audits.
+
+4. **Consistency with Previous Findings:**
+   - A similar issue was considered valid and marked as medium in a recent audit contest [link](https://github.com/sherlock-audit/2024-04-xkeeper-judging/issues/57). Consistency in evaluating findings is essential for maintaining the integrity and reliability of the auditing process.
+
+In conclusion, the absence of documentation about this issue, combined with the acknowledgment that a future function is needed to address it, strongly supports the validity of my finding. It is essential to recognize this as a medium-level issue to ensure that it is appropriately addressed in the protocol's current and future implementations.
+
+**Hash01011122**
+
+@Nikhil8400 
+1. **Documentation and Protocol Transparency:** If it wasn't mentioned in protocol's documentation doesn't mean its a valid issue. Validity will be based on breakage of core functionality or loss of funds
+2. **Acknowledgment of Issue:** Escalation points out that function can be added without any impact caused to protocol or any parties involved. Moreover, your issue doesn't even point out `While there is currently no function to withdraw these fees to keepers`
+3. **Diamond-Upgradable Argument:** Agreed with the reasoning of this one, but it doesn't qualify for medium severity.
+4. **Consistency with Previous Findings:** The [finding](https://github.com/sherlock-audit/2024-04-xkeeper-judging/issues/57) you mentioned, has different root cause then yours. Root cause of that finding is: Discrepancy Gas fee ratio of L1 and L2 chain which breaks the core functionality of contract which cannot be reversed if contracts are deployed. Whereas your issue points out `lossfee` because of no withdraw function which was pointed out by @ctmotox2, which is reversible without causing any impact.
+
+This should be considered as low severity issue.
+
+I hope I answered your concerns @Nikhil8400. 
+
+
+**nevillehuang**
+
+By this logic mentioned [here](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/93#issuecomment-2210719123), any potential issues can be upgraded via the diamond proxy pattern to resolve issue. So I believe this is still a valid medium severity issue.
+
+**ctmotox2**
+
+That logic [here](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/93#issuecomment-2210719123) is related to the recovery of the issue, meaning that issue is reversible without causing any impact as mentioned by @Hash01011122 .
+
+The main point here is that, loss fees are still correctly accounted for in Diamond's storage.
+
+Hence, I believe this issue does not qualify for medium severity. 
+
+
+**WangSecurity**
+
+Firstly, we have to remember that historical decisions are not sources of truth.
+
+Secondly, I believe the design decision rule doesn't apply here. Not due to the reason this issue is not mentioned as a design decision, but because it leads to a loss of funds.
+
+Thirdly, the argument that the upgradeability could resolve this issue decreases the severity, but I disagree it makes the issue low. I agree with the Lead Judge that medium severity is indeed appropriate here.
+
+Planning to reject the escalation and leave the issue as it is. 
+
+**mstpr**
+
+> Firstly, we have to remember that historical decisions are not sources of truth.
+> 
+> Secondly, I believe the design decision rule doesn't apply here. Not due to the reason this issue is not mentioned as a design decision, but because it leads to a loss of funds.
+> 
+> Thirdly, the argument that the upgradeability could resolve this issue decreases the severity, but I disagree it makes the issue low. I agree with the Lead Judge that medium severity is indeed appropriate here.
+> 
+> Planning to reject the escalation and leave the issue as it is.
+
+How do we possibly know that maybe a contract OOS has a function to withdraw the funds? 
+
+**Nikhil8400**
+
+But ser elfi team has admitted this issue in above comments and stated that they are going to fix this in future version [link](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/93#issuecomment-2198576776)
+
+**WangSecurity**
+
+> > Firstly, we have to remember that historical decisions are not sources of truth.
+> > Secondly, I believe the design decision rule doesn't apply here. Not due to the reason this issue is not mentioned as a design decision, but because it leads to a loss of funds.
+> > Thirdly, the argument that the upgradeability could resolve this issue decreases the severity, but I disagree it makes the issue low. I agree with the Lead Judge that medium severity is indeed appropriate here.
+> > Planning to reject the escalation and leave the issue as it is.
+> 
+> How do we possibly know that maybe a contract OOS has a function to withdraw the funds?
+
+If there's concrete evidence there's such a function, please provide it. Otherwise, the decision remains the same, planning to reject the escalation and leave the issue as it is.
+
+**mstpr**
+
+> > > Firstly, we have to remember that historical decisions are not sources of truth.
+> > > Secondly, I believe the design decision rule doesn't apply here. Not due to the reason this issue is not mentioned as a design decision, but because it leads to a loss of funds.
+> > > Thirdly, the argument that the upgradeability could resolve this issue decreases the severity, but I disagree it makes the issue low. I agree with the Lead Judge that medium severity is indeed appropriate here.
+> > > Planning to reject the escalation and leave the issue as it is.
+> > 
+> > 
+> > How do we possibly know that maybe a contract OOS has a function to withdraw the funds?
+> 
+> If there's concrete evidence there's such a function, please provide it. Otherwise, the decision remains the same, planning to reject the escalation and leave the issue as it is.
+
+We assumed a lot of stuff in this contest. 
+
+For example settling the unsettled fees are also not in the code, they are probably in a OOS code. Would that mean if I would've submit unsettled fees can't be settled because there is no functionality would be a valid issue?
+
+"If there's concrete evidence there's such a function, please provide it" I would rather not do that because why would I be checking OOS code... 
+
+
+**WangSecurity**
+
+Fair point, but in this case we also have a confirming this issue is correct. Of course, I don't say the sponsor confirming the bug or adding labels affects the validity or severity of the issue, but I believe [this comment](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/93#issuecomment-2198576776) indeed confirms there is no function to withdraw funds. 
+
+Hence, the decision remains the same, planning to reject the escalation and leave the issue as it is.
+
+**WangSecurity**
+
+Result:
+Medium
+Unique
+
+**sherlock-admin4**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [Ctmotox2](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/93/#issuecomment-2210719123): rejected
+
+# Issue M-9: The implementation of `payExecutionFee()` didn't take `EIP-150` into consideration. Keepers can steal additional execution fee from users. 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/95 
 
@@ -6301,7 +6607,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/50
 
 
-# Issue M-12: If the accounted token balance is higher than actual token balance some transfers can send "0" tokens to destination 
+# Issue M-10: If the accounted token balance is higher than actual token balance some transfers can send "0" tokens to destination 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/100 
 
@@ -6346,7 +6652,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/30
 
 
-# Issue M-13: Unbacked tokens can be used for opening positions 
+# Issue M-11: Unbacked tokens can be used for opening positions 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/102 
 
@@ -6447,11 +6753,9 @@ Mechanistically, it is neutral in the long term, and the mechanism balances the 
 
 Same comments applies for issue #33, #102, #258
 
-# Issue M-14: Users can gas grief or completely block keepers from executing orders 
+# Issue M-12: Users can gas grief or completely block keepers from executing orders 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/107 
-
-The protocol has acknowledged this issue.
 
 ## Found by 
 ZeroTrust, mstpr-brainbot
@@ -6517,7 +6821,17 @@ Manual Review
 ## Recommendation
 There can be several fixes here but the best is probably to check if the account has code or not and send ether accordingly. 
 
-# Issue M-15: Keepers loss gas is never accounted 
+
+
+## Discussion
+
+**sherlock-admin2**
+
+The protocol team fixed this issue in the following PRs/commits:
+https://github.com/0xCedar/elfi-perp-contracts/pull/49
+
+
+# Issue M-13: Keepers loss gas is never accounted 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/108 
 
@@ -6569,7 +6883,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/40
 
 
-# Issue M-16: Contract will reach a point where users will not be able to call `deposit` 
+# Issue M-14: Contract will reach a point where users will not be able to call `deposit` 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/113 
 
@@ -6607,7 +6921,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/55
 
 
-# Issue M-17: The keeper will suffer continuing losses due to miss compensation for L1 rollup fees 
+# Issue M-15: The keeper will suffer continuing losses due to miss compensation for L1 rollup fees 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/141 
 
@@ -6678,7 +6992,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/48
 
 
-# Issue M-18: Missing compensation for the ````21,000```` intrinsic gas cost 
+# Issue M-16: Missing compensation for the ````21,000```` intrinsic gas cost 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/142 
 
@@ -6751,7 +7065,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/48
 
 
-# Issue M-19: A significant ````105,983```` gas cost of ````processExecutionFee()```` execution is not accounted in the keeper's compensation 
+# Issue M-17: A significant ````105,983```` gas cost of ````processExecutionFee()```` execution is not accounted in the keeper's compensation 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/147 
 
@@ -6998,7 +7312,173 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/48
 
 
-# Issue M-20: Use of outdated liability value in decreasePosition leads to account error 
+# Issue M-18: Future upgrades may be difficult or impossible 
+
+Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/194 
+
+The protocol has acknowledged this issue.
+
+## Found by 
+PNS
+## Summary
+
+The project uses nested structures to store data, which may complicate or make future upgrades impossible. In extreme cases, upgrades could lead to data inconsistency and improper system operation.
+
+## Vulnerability Detail
+
+The project uses a structured storage scheme, allowing data in the form of structures to be appropriately linked with facets, theoretically enabling easy updates. However, a problem may arise in future updates because some of these structures contain nested structures that cannot be expanded without "corrupting" the data stored after them in the parent structure.
+
+```solidity
+File: contracts/storage/LpPool.sol:20
+    struct Props {
+       [...]
+        TokenBalance baseTokenBalance; //audit struct
+        EnumerableSet.AddressSet stableTokens;
+        mapping(address => TokenBalance) stableTokenBalances;
+        mapping(address => FeeRewards) tradingFeeRewards;
+        BorrowingFee borrowingFee; //audit struct
+        uint256 apr;
+        uint256 totalClaimedRewards;
+    }
+
+```
+
+```solidity
+File: contracts/storage/Position.sol:12
+   12:     struct Props {
+   13:         bytes32 key;
+  [...]
+   27:         PositionFee positionFee; //audit struct
+   28:         int256 realizedPnl;
+   29:         uint256 lastUpdateTime;
+   30:     }
+
+```
+
+This is a problem analogous to storage gaps in upgradable contracts, but in a more advanced and complicated form, which is why it should be rated as medium.
+
+## Impact
+
+Using nested structures for data storage complicates future upgrades. In extreme cases, this can lead to data inconsistency and improper system operation, which is particularly dangerous in financial systems.
+
+## Code Snippet
+
+- [LpPool.sol#L20-L32](https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/8a1a01804a7de7f73a04d794bf6b8104528681ad/elfi-perp-contracts/contracts/storage/LpPool.sol#L20-L32)
+- [Position.sol#L27](https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/8a1a01804a7de7f73a04d794bf6b8104528681ad/elfi-perp-contracts/contracts/storage/Position.sol#L27)
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+To enable safe extension of inner structures in future upgrades, avoid directly nesting structures. Instead, use mappings, which allow extending structures without the risk of overwriting existing state variables.
+
+### Example Solution
+
+Instead of directly nesting structures, place them in mappings:
+
+```solidity
+mapping(uint256 => TokenBalance) tokenBalances;
+mapping(uint256 => BorrowingFee) borrowingFees;
+```
+
+Access them using constants:
+
+```solidity
+uint256 constant BASE_TOKEN_BALANCE = 0;
+uint256 constant BORROWING_FEE = 1;
+
+// Accessing the values
+TokenBalance storage baseTokenBalance = tokenBalances[BASE_TOKEN_BALANCE];
+BorrowingFee storage borrowingFee = borrowingFees[BORROWING_FEE];
+```
+
+In this way, if there is a need to extend the inner structure in future upgrades, it can be done without the risk of overwriting existing state variables.
+
+#### Reference
+> Do not put structs directly in structs unless you don’t plan on ever adding more state variables to the inner structs. You won't be able to add new state variables to inner structs in upgrades without overwriting existing state variables.
+
+[Source](https://eip2535diamonds.substack.com/p/diamond-upgrades)
+
+
+
+## Discussion
+
+**nevillehuang**
+
+Invalid, speculation on future upgrades
+
+
+**pronobis4**
+
+Escalate
+
+The point here is that diamond acts as a proxy for facets and these structures will be stored in it. If we update the facet that uses this library with a changed structure, we will overwrite the storage. This is why you should avoid nested structures, and that's also why I compare it to storage gaps.
+
+https://eip2535diamonds.substack.com/p/diamond-upgrades
+
+PS. Escalation reported after a discussion on discord
+
+**sherlock-admin3**
+
+> Escalate
+> 
+> The point here is that diamond acts as a proxy for facets and these structures will be stored in it. If we update the facet that uses this library with a changed structure, we will overwrite the storage. This is why you should avoid nested structures, and that's also why I compare it to storage gaps.
+> 
+> https://eip2535diamonds.substack.com/p/diamond-upgrades
+> 
+> PS. Escalation reported after a discussion on discord
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**nevillehuang**
+
+@WangSecurity I believe issue #173 and this issue is valid, but would come down to whether future upgrades are in scope of this contest.
+
+**WangSecurity**
+
+I assume this one the same as #173 doesn't pose risk to the current version of the protocol but will cause issues in the future during updates, correct?
+
+**nevillehuang**
+
+@WangSecurity I believe that is correct, for both issues, it will not affect the current codebase. 
+
+**pronobis4**
+
+Yes, that is correct.
+
+**WangSecurity**
+
+I agree that this is a valid issue related to upgradeability. The contract uses Diamond proxies which I believe is quite complex, hence, I think it's fair to validate this issue. To understand my decision, I think it's quite similar to the exception of the storage gaps rule:
+> Exception: However, if the protocol design has a highly complex and branched set of contract inheritance with storage gaps inconsistently applied throughout and the submission clearly describes the necessity of storage gaps it can be considered a valid medium
+
+Of course, this issue is not connected to storage gaps in any way, but it's a complex structure and will cause issues after upgrades.
+
+Planning to accept the escalation and validate the issue with medium severity.
+
+**WangSecurity**
+
+Result:
+Medium  
+Has duplicates
+
+**sherlock-admin2**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [pronobis4](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/194/#issuecomment-2210396100): accepted
+
+**pronobis4**
+
+@WangSecurity @nevillehuang I think there's something wrong with escalations
+
+# Issue M-19: Use of outdated liability value in decreasePosition leads to account error 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/198 
 
@@ -7059,7 +7539,7 @@ PoC requested from @Renzo1
 
 Requests remaining: **7**
 
-# Issue M-21: The balance.unsettledAmount is missing in the calculations for  `getMaxWithdraw`  and `isSubAmountAllowed` in UsdPool.sol 
+# Issue M-20: The balance.unsettledAmount is missing in the calculations for  `getMaxWithdraw`  and `isSubAmountAllowed` in UsdPool.sol 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/236 
 
@@ -7156,105 +7636,127 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/62
 
 
-# Issue M-22: The calculations in `isSubAmountAllowed` overcounted balance.unsettledAmount in LpPool.sol 
+**0502lian**
 
-Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/237 
-
-## Found by 
-ZeroTrust
-
-
-## Summary
-The calculations in `isSubAmountAllowed` overcounted balance.unsettledAmount in LpPool.sol
-## Vulnerability Detail
+Escalate
+This issue should be high.
+There is a calculation error inside the `UsdPool::isSubAmountAllowed()` function.
+`UsdPool::isSubAmountAllowed()` is called by `UsdPool::subStableToken()`
 ```javascript
- function isSubAmountAllowed(Props storage self, address token, uint256 amount) internal view returns (bool) {
-        TokenBalance storage balance = token == self.baseToken
-            ? self.baseTokenBalance
-            : self.stableTokenBalances[token];
-        if (balance.amount < amount) {
-            return false;
-        }
-        uint256 poolLiquidityLimit = getPoolLiquidityLimit(self);
-        if (poolLiquidityLimit == 0) {
-            return
- @>>               balance.amount.toInt256() + balance.unsettledAmount - balance.holdAmount.toInt256() >=
-                amount.toInt256();
-        } else {
-            return
-                CalUtils.mulRate(
- @>>                   balance.amount.toInt256() - amount.toInt256() + balance.unsettledAmount,
-                    poolLiquidityLimit.toInt256()
-                ) >= balance.holdAmount.toInt256();
-        }
+   function subStableToken(Props storage self, address stableToken, uint amount) external {
+@>>        require(isSubAmountAllowed(self, stableToken, amount), "sub failed with balance not enough");
+        UsdPoolTokenUpdateCache memory cache = _convertBalanceToCache(
+            stableToken,
+            self.stableTokenBalances[stableToken]
+        );
+        self.stableTokenBalances[stableToken].amount -= amount;
+        cache.amount = self.stableTokenBalances[stableToken].amount;
+        _emitPoolUpdateEvent(cache);
     }
-
-```
-We can see that the calculations in `isSubAmountAllowed` overcounted balance.unsettledAmount. The balance.unsettledAmount represents the fees earned by the pool, but the assets have not yet been transferred. 
-The same issues are in `getPoolAvailableLiquidity` and `getUsdPoolAvailableLiquidity` in LpPoolQueryProcess.sol.
-## Impact
-The higher-level function calls to getMaxWithdraw and isSubAmountAllowed should return false, but they return true instead, preventing the function from continuing to execute correctly.
-## Code Snippet
-https://github.com/sherlock-audit/2024-05-elfi-protocol/blob/main/elfi-perp-contracts/contracts/storage/LpPool.sol#L401
-## Tool used
-
-Manual Review
-
-## Recommendation
-```diff
- function isSubAmountAllowed(Props storage self, address token, uint256 amount) internal view returns (bool) {
-        TokenBalance storage balance = token == self.baseToken
-            ? self.baseTokenBalance
-            : self.stableTokenBalances[token];
-        if (balance.amount < amount) {
-            return false;
-        }
-        uint256 poolLiquidityLimit = getPoolLiquidityLimit(self);
-        if (poolLiquidityLimit == 0) {
-            return
--               balance.amount.toInt256() + balance.unsettledAmount - balance.holdAmount.toInt256() >=
-+               balance.amount.toInt256() - balance.holdAmount.toInt256() >=
-                amount.toInt256();
-        } else {
-            return
-                CalUtils.mulRate(
--                   balance.amount.toInt256() - amount.toInt256() + balance.unsettledAmount,
-+                   balance.amount.toInt256() - amount.toInt256() ,
-                    poolLiquidityLimit.toInt256()
-                ) >= balance.holdAmount.toInt256();
-        }
-    }
-
 ```
 
+The functions `ClaimRewardsProcess.claimRewards()`, `LpPoolProcess.updatePnlAndUnHoldPoolAmount()` (called by decreasePosition), and `RedeemProcess._redeemStakeUsd()` internally call `UsdPool::subStableToken()`, then will revert,    which causes users to be unable to claim rewards, reduce positions, and redeem StakeUsd. Additionally, if no new funds are added by other users, the impact could last for over a week.
+According to [Sherlock’s rules](https://docs.sherlock.xyz/audits/judging/judging#v.-how-to-identify-a-medium-issue), “The issue causes locking of funds for users for more than a week,” it qualifies as High.
+
+**sherlock-admin3**
+
+> Escalate
+> This issue should be high.
+> There is a calculation error inside the `UsdPool::isSubAmountAllowed()` function.
+> `UsdPool::isSubAmountAllowed()` is called by `UsdPool::subStableToken()`
+> ```javascript
+>    function subStableToken(Props storage self, address stableToken, uint amount) external {
+> @>>        require(isSubAmountAllowed(self, stableToken, amount), "sub failed with balance not enough");
+>         UsdPoolTokenUpdateCache memory cache = _convertBalanceToCache(
+>             stableToken,
+>             self.stableTokenBalances[stableToken]
+>         );
+>         self.stableTokenBalances[stableToken].amount -= amount;
+>         cache.amount = self.stableTokenBalances[stableToken].amount;
+>         _emitPoolUpdateEvent(cache);
+>     }
+> ```
+> 
+> The functions `ClaimRewardsProcess.claimRewards()`, `LpPoolProcess.updatePnlAndUnHoldPoolAmount()` (called by decreasePosition), and `RedeemProcess._redeemStakeUsd()` internally call `UsdPool::subStableToken()`, then will revert,    which causes users to be unable to claim rewards, reduce positions, and redeem StakeUsd. Additionally, if no new funds are added by other users, the impact could last for over a week.
+> According to [Sherlock’s rules](https://docs.sherlock.xyz/audits/judging/judging#v.-how-to-identify-a-medium-issue), “The issue causes locking of funds for users for more than a week,” it qualifies as High.
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Hash01011122**
+
+I understand the path which could lead to the scenario mentioned, my question is what exactly would be the impact? How did you come to conclusion that DOS could last for over a week not a day or month??
+@0502lian @ZeroTrust01 
+
+**0502lian**
+
+> if no new funds are added by other users, the impact could last for over a week.
+
+if no new funds are added by other users, the impact could last for over a week.  This mentions a possibility. Our job in auditing is to identify various issues that can affect the system. Regarding this issue, the larger the amount users want to reduce their positions and redeem, the higher the probability of Revert caused by calculation errors. The longer the time, the higher the probability of new funds coming in from users. In extreme cases, it could take a month, although the probability is very low. @Hash01011122 
+
+**mstpr**
+
+Escalate
+
+This should be invalid. `unsettledFee` is not liquid in the contract until it is settled. Including it in the accounting does not make sense because `unsettledFee` does not exist in the pools as a token. While accounting for it in the total value makes sense, both functions mentioned are strictly for the actual token balances, and `unsettledFee` does not exist in those balances.
 
 
 
-## Discussion
+**sherlock-admin3**
 
-**sherlock-admin2**
+> Escalate
+> 
+> This should be invalid. `unsettledFee` is not liquid in the contract until it is settled. Including it in the accounting does not make sense because `unsettledFee` does not exist in the pools as a token. While accounting for it in the total value makes sense, both functions mentioned are strictly for the actual token balances, and `unsettledFee` does not exist in those balances.
+> 
+> 
 
-The protocol team fixed this issue in the following PRs/commits:
-https://github.com/0xCedar/elfi-perp-contracts/pull/62
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**WangSecurity**
+
+I agree with @mstpr comment, but to make sure I totally understand the issue, what are the pre-requisites for this issue to occur? Just as soon as the users start using the protocol? @0502lian could you make a small scenario how this issue would occur with real numbers that would be used and the links to appropriate functions?
+
+**0502lian**
+
+> I agree with @mstpr comment, but to make sure I totally understand the issue, what are the pre-requisites for this issue to occur? Just as soon as the users start using the protocol? @0502lian could you make a small scenario how this issue would occur with real numbers that would be used and the links to appropriate functions?
 
 
-**nevillehuang**
+@mstpr Escalate both issue 236 and issue 237.
+Issue 236 and issue 237 are somewhat related and comparable. I have pointed out the flaws in his views and partially answered your questions in the latest comments on issue 237.
+Perhaps we should wait and see what he says.  @WangSecurity 
 
-request poc
+**WangSecurity**
 
-Could you provide a more specific impact that meets sherlock criteria for DoS? Same for #236. Would prefer if there is a more detailed PoC that shows any reverts as well.
+I agree this is a valid issue, but medium severity is more appropriate here. As I understand, there are specific conditions required for this to happen and it won't happen always with every user. Secondly, about the following:
 
-> 1. The issue causes locking of funds for users for more than a week.
-> 2. The issue impacts the availability of time-sensitive functions (cutoff functions are not considered time-sensitive). If at least one of these are describing the case, the issue can be a Medium. If both apply, the issue can be considered of High severity. Additional constraints related to the issue may decrease its severity accordingly.
-Griefing for gas (frontrunning a transaction to fail, even if can be done perpetually) is considered a DoS of a single block, hence only if the function is clearly time-sensitive, it can be a Medium severity issue.
+> According to [Sherlock’s rules](https://docs.sherlock.xyz/audits/judging/judging#v.-how-to-identify-a-medium-issue), “The issue causes locking of funds for users for more than a week,” it qualifies as High
 
-**sherlock-admin4**
+The rule doesn't say "The issue causes locking of funds for users for more than a week" is necessarily high severity and medium is more appropriate here.
 
-PoC requested from @ZeroTrust01
+Planning to reject both escalations and leave the issue as it is.
 
-Requests remaining: **9**
+**WangSecurity**
 
-# Issue M-23: Users can have positions with a margin lower than the allowed minimum margin 
+Result:
+Medium
+Unique
+
+**sherlock-admin3**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [0502lian](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/236/#issuecomment-2210368272): rejected
+- [mstpr](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/236/#issuecomment-2210744169): rejected
+
+# Issue M-21: Users can have positions with a margin lower than the allowed minimum margin 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/249 
 
@@ -7405,7 +7907,7 @@ Check whether the remaining margin is higher the allowed min margin
 
 Yes, we are considering retaining a smaller margin when users reduce their positions or change their leverage
 
-# Issue M-24: The USer will receive less amount  than user expected 
+# Issue M-22: The USer will receive less amount  than user expected 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/251 
 
@@ -7513,7 +8015,7 @@ index dedfe16e..eb6c84fe 100644
          StakeToken(params.stakeToken).transferOut(params.redeemToken, params.receiver, redeemTokenAmount - redeemFee);
 ```
 
-# Issue M-25: `isHoldAmountAllowed` and `isSubAmountAllowed` wrong subtraction will result in DoS 
+# Issue M-23: `isHoldAmountAllowed` and `isSubAmountAllowed` wrong subtraction will result in DoS 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/255 
 
@@ -7606,7 +8108,7 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/45
 
 
-# Issue M-26: User Collateral Cap Check Issue 
+# Issue M-24: User Collateral Cap Check Issue 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/262 
 
