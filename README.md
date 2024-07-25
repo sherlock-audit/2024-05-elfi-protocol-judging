@@ -165,6 +165,10 @@ Not really.
 1- Keepers were RESTRICTED in the contest which means they only execute positions.
 2- Since opening positions are 2 step, creating request and executing it, if user opens a greedy position where it gets liquidatable by the time its actually executed then it wouldn't even be keepers fault
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-2: Anyone can change the balance of an account to drain the entire portfolio vault 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/28 
@@ -226,6 +230,10 @@ I am guessing this function should not be existed and here for test purposes, mi
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/11
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue H-3: Pool value does not consider the open funding fees 
 
@@ -1011,6 +1019,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/13
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-5: `updatePositionFromBalanceMargin` function returns "0" if amount to be updated is negative 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/36 
@@ -1073,6 +1085,10 @@ The same as: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/iss
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/15
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue H-6: Closing partial positions miscounts the settled fees 
 
@@ -1481,6 +1497,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/25
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-7: Position net value is using outdated fees 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/41 
@@ -1874,6 +1894,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/26
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-10: Increasing leverage can make the position have "0" `initialMargin` 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/49 
@@ -2102,6 +2126,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/57
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-11: redeem stake token may be Dos because there is not enough balance in stake pool. 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/57 
@@ -2229,6 +2257,20 @@ Manual Review
 
 ## Recommendation
 transfer funds from the portfolio vault to the market vault during the minting process
+
+
+
+## Discussion
+
+**sherlock-admin2**
+
+The protocol team fixed this issue in the following PRs/commits:
+https://github.com/0xCedar/elfi-perp-contracts/pull/54
+
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue H-12: Closing positions does not decrease the pool's entry price, leading to misleading pool value calculations 
 
@@ -2521,6 +2563,10 @@ Decrease the entry price in average just like its done in increasing
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/18
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue H-13: If cross positions use the same margin token as collateral and close without liability, then fee accounting will be completely wrong 
 
@@ -3041,6 +3087,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/31
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-14: Lack of timely update borrowing fee when update position's margin 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/63 
@@ -3281,6 +3331,10 @@ Escalations have been resolved successfully!
 Escalation status:
 - [Hash01011122](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/66/#issuecomment-2210834428): rejected
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-16: Pool value calculation skips accounting for stable token losses and short uPnL 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/71 
@@ -3474,6 +3528,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/14
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-17: LpPool's can become insolvent if shorters are in huge profits 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/72 
@@ -3541,6 +3599,10 @@ I think the best approach would be to introduce a function that liquidates a sho
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/42/files
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue H-18: Submitting mint request using user's trading balance and cancelling it will not refund tokens back to trading account 
 
@@ -3634,6 +3696,10 @@ The following solution, updates the trading balance account:
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/53
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue H-19: Users can use weth to replace any margin token in createUpdatePositionMarginRequest() 
 
@@ -3841,6 +3907,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/37
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-20: Traders may decrease the loss via decrease the position's margin 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/82 
@@ -3976,6 +4046,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/57
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-21: Canceling a mint stake token can result in the execution fee being sent from the wrong vault 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/86 
@@ -4080,6 +4154,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/54
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-22: If the stake token is minted from portfolio vault, positions from balances are not decreased 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/106 
@@ -4156,6 +4234,10 @@ https://github.com/0xCedar/elfi-perp-contracts/pull/51
 
 "fromBalance" is extremely important to measure users cross available value which is the value user is allowed to open cross positions. When an amount is withdrawn from users cross balance without updating its "fromBalance" the cross available value will be higher than usual although the user has lesser collateral which means user can open positions that are more than allowed respect to his/her cross portfolio balances
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-23: Deleveraging can result in a zero borrowed amount while maintaining the leveraged position 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/114 
@@ -4222,6 +4304,10 @@ This is the fix PR: https://github.com/0xCedar/elfi-perp-contracts/pull/57
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/57
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue H-24: Excess fromBalance removal not added to other positions fromBalance's when leveraging up 
 
@@ -4335,6 +4421,10 @@ If there is an excess amount that can't be decreased from the current positions 
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/35
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue H-25: Updating leverage changes the cross net and cross available value 
 
@@ -4535,6 +4625,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/57
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-26: Minting stake tokens is not updating the pool's borrowing fee rate 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/136 
@@ -4595,6 +4689,10 @@ Just like the opening orders update the rates after the pools base amounts chang
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/47
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue H-27: Attacker can inflate stake rewards as he wants. 
 
@@ -4702,6 +4800,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/19
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-28: Improper implementation of the `PositionMarginProcess.updatePositionFromBalanceMargin()` function. 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/159 
@@ -4781,6 +4883,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/57
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue H-29: Incorrect implementation of the `PositionMarginProcess.updatePositionFromBalanceMargin()` function. 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/163 
@@ -4843,6 +4949,10 @@ The `PositionMarginProcess.updatePositionFromBalanceMargin()` function should be
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/43
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue H-30: Mismatching funding fees can result in the protocol incurring a deficit or insolvency risk 
 
@@ -5443,6 +5553,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/29
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue M-1: Cross positions that exceed the allowed margin can be opened 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/34 
@@ -5779,6 +5893,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/22
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue M-3: Incorrect settleFee process for cross-margin account 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/61 
@@ -5871,6 +5989,10 @@ There is a problem here： when cache.recordPnlToken + cache.settledFee is negat
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/31
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue M-4: Lack of execution fee mechanism in AccountFacet 
 
@@ -5978,6 +6100,10 @@ Escalations have been resolved successfully!
 
 Escalation status:
 - [Ctmotox2](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/62/#issuecomment-2210739109): rejected
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue M-5: If stable tokens depeg, short funding fees will not be accounted properly 
 
@@ -6223,6 +6349,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/16
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue M-7: Lack of oracle setting in autoReducePositions 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/83 
@@ -6334,6 +6464,10 @@ Add `OracleProcess.setOraclePrice(oracles);` and `OracleProcess.clearOraclePrice
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/21
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue M-8: The `lossFee` is simply added to the `commonData` and not reimbursed to the keeper, leading to potential losses for the keeper. 
 
@@ -6607,6 +6741,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/50
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue M-10: If the accounted token balance is higher than actual token balance some transfers can send "0" tokens to destination 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/100 
@@ -6651,6 +6789,10 @@ Also check what's transferred and if there is a leak account it. Also, if the us
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/30
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue M-11: Unbacked tokens can be used for opening positions 
 
@@ -6831,6 +6973,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/49
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue M-13: Keepers loss gas is never accounted 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/108 
@@ -6883,6 +7029,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/40
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue M-14: Contract will reach a point where users will not be able to call `deposit` 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/113 
@@ -6920,6 +7070,10 @@ Call `subTradeTokenCollateral` when the amount of collateral is being reduced (e
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/55
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue M-15: The keeper will suffer continuing losses due to miss compensation for L1 rollup fees 
 
@@ -6991,6 +7145,10 @@ Compensating  L1 rollup fee as references of the above ````Arbitrum```` and ````
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/48
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue M-16: Missing compensation for the ````21,000```` intrinsic gas cost 
 
@@ -7064,6 +7222,10 @@ File: contracts\facets\OrderFacet.sol
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/48
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue M-17: A significant ````105,983```` gas cost of ````processExecutionFee()```` execution is not accounted in the keeper's compensation 
 
@@ -7312,6 +7474,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/48
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue M-18: Future upgrades may be difficult or impossible 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/194 
@@ -7539,6 +7705,10 @@ PoC requested from @Renzo1
 
 Requests remaining: **7**
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue M-20: The balance.unsettledAmount is missing in the calculations for  `getMaxWithdraw`  and `isSubAmountAllowed` in UsdPool.sol 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/236 
@@ -7755,6 +7925,10 @@ Escalations have been resolved successfully!
 Escalation status:
 - [0502lian](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/236/#issuecomment-2210368272): rejected
 - [mstpr](https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/236/#issuecomment-2210744169): rejected
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
 # Issue M-21: Users can have positions with a margin lower than the allowed minimum margin 
 
@@ -8108,6 +8282,10 @@ The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/45
 
 
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
+
 # Issue M-24: User Collateral Cap Check Issue 
 
 Source: https://github.com/sherlock-audit/2024-05-elfi-protocol-judging/issues/262 
@@ -8226,4 +8404,8 @@ This issue has been labeled `won't fix` but https://github.com/sherlock-audit/20
 The protocol team fixed this issue in the following PRs/commits:
 https://github.com/0xCedar/elfi-perp-contracts/pull/41
 
+
+**sherlock-admin2**
+
+The Lead Senior Watson signed off on the fix.
 
